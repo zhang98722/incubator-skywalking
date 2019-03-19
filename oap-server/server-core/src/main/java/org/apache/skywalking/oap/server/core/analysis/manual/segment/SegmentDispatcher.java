@@ -32,6 +32,7 @@ public class SegmentDispatcher implements SourceDispatcher<Segment> {
         segment.setSegmentId(source.getSegmentId());
         segment.setTraceId(source.getTraceId());
         segment.setServiceId(source.getServiceId());
+        segment.setServiceInstanceId(source.getServiceInstanceId());
         segment.setEndpointName(source.getEndpointName());
         segment.setEndpointId(source.getEndpointId());
         segment.setStartTime(source.getStartTime());
@@ -40,6 +41,7 @@ public class SegmentDispatcher implements SourceDispatcher<Segment> {
         segment.setIsError(source.getIsError());
         segment.setDataBinary(source.getDataBinary());
         segment.setTimeBucket(source.getTimeBucket());
+        segment.setVersion(source.getVersion());
 
         RecordProcess.INSTANCE.in(segment);
     }

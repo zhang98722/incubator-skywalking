@@ -44,7 +44,7 @@ public enum IndicatorProcess {
         String modelName = StorageEntityAnnotationUtils.getModelName(indicatorClass);
         Class<? extends StorageBuilder> builderClass = StorageEntityAnnotationUtils.getBuilder(indicatorClass);
 
-        StorageDAO storageDAO = moduleManager.find(StorageModule.NAME).getService(StorageDAO.class);
+        StorageDAO storageDAO = moduleManager.find(StorageModule.NAME).provider().getService(StorageDAO.class);
         IIndicatorDAO indicatorDAO;
         try {
             indicatorDAO = storageDAO.newIndicatorDao(builderClass.newInstance());
@@ -57,13 +57,13 @@ public enum IndicatorProcess {
         IndicatorPersistentWorker dayPersistentWorker = worker(moduleManager, indicatorDAO, modelName + Const.ID_SPLIT + Downsampling.Day.getName());
         IndicatorPersistentWorker monthPersistentWorker = worker(moduleManager, indicatorDAO, modelName + Const.ID_SPLIT + Downsampling.Month.getName());
 
-        IndicatorTransWorker transWorker = new IndicatorTransWorker(WorkerIdGenerator.INSTANCES.generate(), minutePersistentWorker, hourPersistentWorker, dayPersistentWorker, monthPersistentWorker);
+        IndicatorTransWorker transWorker = new IndicatorTransWorker(moduleManager, modelName, WorkerIdGenerator.INSTANCES.generate(), minutePersistentWorker, hourPersistentWorker, dayPersistentWorker, monthPersistentWorker);
         WorkerInstances.INSTANCES.put(transWorker.getWorkerId(), transWorker);
 
         IndicatorRemoteWorker remoteWorker = new IndicatorRemoteWorker(WorkerIdGenerator.INSTANCES.generate(), moduleManager, transWorker, modelName);
         WorkerInstances.INSTANCES.put(remoteWorker.getWorkerId(), remoteWorker);
 
-        IndicatorAggregateWorker aggregateWorker = new IndicatorAggregateWorker(WorkerIdGenerator.INSTANCES.generate(), remoteWorker, modelName);
+        IndicatorAggregateWorker aggregateWorker = new IndicatorAggregateWorker(moduleManager, WorkerIdGenerator.INSTANCES.generate(), remoteWorker, modelName);
         WorkerInstances.INSTANCES.put(aggregateWorker.getWorkerId(), aggregateWorker);
 
         entryWorkers.put(indicatorClass, aggregateWorker);
@@ -74,8 +74,11 @@ public enum IndicatorProcess {
         AlarmNotifyWorker alarmNotifyWorker = new AlarmNotifyWorker(WorkerIdGenerator.INSTANCES.generate(), moduleManager);
         WorkerInstances.INSTANCES.put(alarmNotifyWorker.getWorkerId(), alarmNotifyWorker);
 
+        ExportWorker exportWorker = new ExportWorker(WorkerIdGenerator.INSTANCES.generate(), moduleManager);
+        WorkerInstances.INSTANCES.put(exportWorker.getWorkerId(), exportWorker);
+
         IndicatorPersistentWorker minutePersistentWorker = new IndicatorPersistentWorker(WorkerIdGenerator.INSTANCES.generate(), modelName,
-            1000, moduleManager, indicatorDAO, alarmNotifyWorker);
+            1000, moduleManager, indicatorDAO, alarmNotifyWorker, exportWorker);
         WorkerInstances.INSTANCES.put(minutePersistentWorker.getWorkerId(), minutePersistentWorker);
         persistentWorkers.add(minutePersistentWorker);
 
@@ -85,7 +88,7 @@ public enum IndicatorProcess {
     private IndicatorPersistentWorker worker(ModuleManager moduleManager,
         IIndicatorDAO indicatorDAO, String modelName) {
         IndicatorPersistentWorker persistentWorker = new IndicatorPersistentWorker(WorkerIdGenerator.INSTANCES.generate(), modelName,
-            1000, moduleManager, indicatorDAO, null);
+            1000, moduleManager, indicatorDAO, null, null);
         WorkerInstances.INSTANCES.put(persistentWorker.getWorkerId(), persistentWorker);
         persistentWorkers.add(persistentWorker);
 

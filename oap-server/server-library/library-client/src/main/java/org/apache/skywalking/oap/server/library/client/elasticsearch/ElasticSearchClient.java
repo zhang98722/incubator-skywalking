@@ -18,29 +18,47 @@
 
 package org.apache.skywalking.oap.server.library.client.elasticsearch;
 
-import java.io.IOException;
-import java.util.*;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.http.*;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.skywalking.oap.server.library.client.Client;
-import org.apache.skywalking.oap.server.library.client.*;
-import org.elasticsearch.action.admin.indices.create.*;
-import org.elasticsearch.action.admin.indices.delete.*;
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
+import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
+import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
 import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
-import org.elasticsearch.action.bulk.*;
-import org.elasticsearch.action.get.*;
+import org.elasticsearch.action.bulk.BackoffPolicy;
+import org.elasticsearch.action.bulk.BulkProcessor;
+import org.elasticsearch.action.bulk.BulkRequest;
+import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.get.GetRequest;
+import org.elasticsearch.action.get.GetResponse;
+import org.elasticsearch.action.get.MultiGetRequest;
+import org.elasticsearch.action.get.MultiGetResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.action.update.UpdateRequest;
-import org.elasticsearch.client.*;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.unit.*;
+import org.elasticsearch.common.unit.ByteSizeUnit;
+import org.elasticsearch.common.unit.ByteSizeValue;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.slf4j.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author peng-yongsheng
@@ -51,15 +69,15 @@ public class ElasticSearchClient implements Client {
 
     private static final String TYPE = "type";
     private final String clusterNodes;
-    private final NameSpace namespace;
+    private final String namespace;
     private RestHighLevelClient client;
 
-    public ElasticSearchClient(String clusterNodes, NameSpace namespace) {
+    public ElasticSearchClient(String clusterNodes, String namespace) {
         this.clusterNodes = clusterNodes;
         this.namespace = namespace;
     }
 
-    @Override public void initialize() {
+    @Override public void connect() {
         List<HttpHost> pairsList = parseClusterNodes(clusterNodes);
 
         client = new RestHighLevelClient(
@@ -94,7 +112,7 @@ public class ElasticSearchClient implements Client {
         request.settings(settings);
         request.mapping(TYPE, mappingBuilder);
         CreateIndexResponse response = client.indices().create(request);
-        logger.info("create {} index finished, isAcknowledged: {}", indexName, response.isAcknowledged());
+        logger.debug("create {} index finished, isAcknowledged: {}", indexName, response.isAcknowledged());
         return response.isAcknowledged();
     }
 
@@ -103,7 +121,7 @@ public class ElasticSearchClient implements Client {
         DeleteIndexRequest request = new DeleteIndexRequest(indexName);
         DeleteIndexResponse response;
         response = client.indices().delete(request);
-        logger.info("delete {} index finished, isAcknowledged: {}", indexName, response.isAcknowledged());
+        logger.debug("delete {} index finished, isAcknowledged: {}", indexName, response.isAcknowledged());
         return response.isAcknowledged();
     }
 
@@ -142,7 +160,6 @@ public class ElasticSearchClient implements Client {
     }
 
     public void forceUpdate(String indexName, String id, XContentBuilder source, long version) throws IOException {
-        indexName = formatIndexName(indexName);
         UpdateRequest request = prepareUpdate(indexName, id, source);
         request.version(version);
         request.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
@@ -150,7 +167,6 @@ public class ElasticSearchClient implements Client {
     }
 
     public void forceUpdate(String indexName, String id, XContentBuilder source) throws IOException {
-        indexName = formatIndexName(indexName);
         UpdateRequest request = prepareUpdate(indexName, id, source);
         request.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
         client.update(request);
@@ -180,12 +196,13 @@ public class ElasticSearchClient implements Client {
             "}";
         HttpEntity entity = new NStringEntity(jsonString, ContentType.APPLICATION_JSON);
         Response response = client.getLowLevelClient().performRequest("POST", "/" + indexName + "/_delete_by_query", params, entity);
+        logger.debug("delete indexName: {}, jsonString : {}", indexName, jsonString);
         return response.getStatusLine().getStatusCode();
     }
 
-    private String formatIndexName(String indexName) {
-        if (Objects.nonNull(namespace) && StringUtils.isNotEmpty(namespace.getNameSpace())) {
-            return namespace.getNameSpace() + "_" + indexName;
+    public String formatIndexName(String indexName) {
+        if (StringUtils.isNotEmpty(namespace)) {
+            return namespace + "_" + indexName;
         }
         return indexName;
     }

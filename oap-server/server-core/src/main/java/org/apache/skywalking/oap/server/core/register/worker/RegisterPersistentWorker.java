@@ -20,10 +20,11 @@ package org.apache.skywalking.oap.server.core.register.worker;
 
 import java.util.*;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
-import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
+import org.apache.skywalking.apm.commons.datacarrier.consumer.*;
+import org.apache.skywalking.oap.server.core.*;
 import org.apache.skywalking.oap.server.core.analysis.data.EndOfBatchContext;
 import org.apache.skywalking.oap.server.core.register.RegisterSource;
-import org.apache.skywalking.oap.server.core.source.Scope;
+import org.apache.skywalking.oap.server.core.source.DefaultScopeDefine;
 import org.apache.skywalking.oap.server.core.storage.*;
 import org.apache.skywalking.oap.server.core.worker.AbstractWorker;
 import org.apache.skywalking.oap.server.library.module.ModuleManager;
@@ -36,7 +37,7 @@ public class RegisterPersistentWorker extends AbstractWorker<RegisterSource> {
 
     private static final Logger logger = LoggerFactory.getLogger(RegisterPersistentWorker.class);
 
-    private final Scope scope;
+    private final int scopeId;
     private final String modelName;
     private final Map<RegisterSource, RegisterSource> sources;
     private final IRegisterLockDAO registerLockDAO;
@@ -44,15 +45,28 @@ public class RegisterPersistentWorker extends AbstractWorker<RegisterSource> {
     private final DataCarrier<RegisterSource> dataCarrier;
 
     RegisterPersistentWorker(int workerId, String modelName, ModuleManager moduleManager,
-        IRegisterDAO registerDAO, Scope scope) {
+        IRegisterDAO registerDAO, int scopeId) {
         super(workerId);
         this.modelName = modelName;
         this.sources = new HashMap<>();
         this.registerDAO = registerDAO;
-        this.registerLockDAO = moduleManager.find(StorageModule.NAME).getService(IRegisterLockDAO.class);
-        this.scope = scope;
-        this.dataCarrier = new DataCarrier<>("IndicatorPersistentWorker." + modelName, 1, 10000);
-        this.dataCarrier.consume(new RegisterPersistentWorker.PersistentConsumer(this), 1);
+        this.registerLockDAO = moduleManager.find(StorageModule.NAME).provider().getService(IRegisterLockDAO.class);
+        this.scopeId = scopeId;
+        this.dataCarrier = new DataCarrier<>("IndicatorPersistentWorker." + modelName, 1, 1000);
+
+        String name = "REGISTER_L2";
+        int size = BulkConsumePool.Creator.recommendMaxSize() / 8;
+        if (size == 0) {
+            size = 1;
+        }
+        BulkConsumePool.Creator creator = new BulkConsumePool.Creator(name, size, 200);
+        try {
+            ConsumerPoolFactory.INSTANCE.createIfAbsent(name, creator);
+        } catch (Exception e) {
+            throw new UnexpectedException(e.getMessage(), e);
+        }
+
+        this.dataCarrier.consume(ConsumerPoolFactory.INSTANCE.get(name), new RegisterPersistentWorker.PersistentConsumer(this));
     }
 
     @Override public final void in(RegisterSource registerSource) {
@@ -67,31 +81,39 @@ public class RegisterPersistentWorker extends AbstractWorker<RegisterSource> {
             sources.get(registerSource).combine(registerSource);
         }
 
-        if (registerSource.getEndOfBatchContext().isEndOfBatch()) {
-
-            if (registerLockDAO.tryLock(scope)) {
+        if (sources.size() > 1000 || registerSource.getEndOfBatchContext().isEndOfBatch()) {
+            sources.values().forEach(source -> {
                 try {
-                    sources.values().forEach(source -> {
-                        try {
-                            RegisterSource dbSource = registerDAO.get(modelName, source.id());
-                            if (Objects.nonNull(dbSource)) {
-                                dbSource.combine(source);
-                                registerDAO.forceUpdate(modelName, dbSource);
-                            } else {
-                                int sequence = registerDAO.max(modelName);
-                                source.setSequence(sequence + 1);
-                                registerDAO.forceInsert(modelName, source);
-                            }
-                        } catch (Throwable t) {
-                            logger.error(t.getMessage(), t);
+                    RegisterSource dbSource = registerDAO.get(modelName, source.id());
+                    if (Objects.nonNull(dbSource)) {
+                        if (dbSource.combine(source)) {
+                            registerDAO.forceUpdate(modelName, dbSource);
                         }
-                    });
-                } finally {
-                    registerLockDAO.releaseLock(scope);
+                    } else {
+                        int sequence;
+                        if ((sequence = registerLockDAO.getId(scopeId, source)) != Const.NONE) {
+                            try {
+                                dbSource = registerDAO.get(modelName, source.id());
+                                if (Objects.nonNull(dbSource)) {
+                                    if (dbSource.combine(source)) {
+                                        registerDAO.forceUpdate(modelName, dbSource);
+                                    }
+                                } else {
+                                    source.setSequence(sequence);
+                                    registerDAO.forceInsert(modelName, source);
+                                }
+                            } catch (Throwable t) {
+                                logger.error(t.getMessage(), t);
+                            }
+                        } else {
+                            logger.info("{} inventory register try lock and increment sequence failure.", DefaultScopeDefine.nameOf(scopeId));
+                        }
+                    }
+                } catch (Throwable t) {
+                    logger.error(t.getMessage(), t);
                 }
-            } else {
-                logger.info("Inventory register try lock failure.");
-            }
+            });
+            sources.clear();
         }
     }
 

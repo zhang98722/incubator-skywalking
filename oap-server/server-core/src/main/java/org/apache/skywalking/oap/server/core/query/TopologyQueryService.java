@@ -27,9 +27,10 @@ import org.apache.skywalking.oap.server.core.query.entity.*;
 import org.apache.skywalking.oap.server.core.source.DetectPoint;
 import org.apache.skywalking.oap.server.core.storage.StorageModule;
 import org.apache.skywalking.oap.server.core.storage.query.*;
-import org.apache.skywalking.oap.server.library.module.*;
 import org.apache.skywalking.oap.server.library.module.Service;
-import org.apache.skywalking.oap.server.library.util.*;
+import org.apache.skywalking.oap.server.library.module.*;
+import org.apache.skywalking.oap.server.library.util.CollectionUtils;
+import org.elasticsearch.common.Strings;
 import org.slf4j.*;
 
 /**
@@ -51,28 +52,28 @@ public class TopologyQueryService implements Service {
 
     private IMetadataQueryDAO getMetadataQueryDAO() {
         if (metadataQueryDAO == null) {
-            metadataQueryDAO = moduleManager.find(StorageModule.NAME).getService(IMetadataQueryDAO.class);
+            metadataQueryDAO = moduleManager.find(StorageModule.NAME).provider().getService(IMetadataQueryDAO.class);
         }
         return metadataQueryDAO;
     }
 
     private ITopologyQueryDAO getTopologyQueryDAO() {
         if (topologyQueryDAO == null) {
-            topologyQueryDAO = moduleManager.find(StorageModule.NAME).getService(ITopologyQueryDAO.class);
+            topologyQueryDAO = moduleManager.find(StorageModule.NAME).provider().getService(ITopologyQueryDAO.class);
         }
         return topologyQueryDAO;
     }
 
     private IComponentLibraryCatalogService getComponentLibraryCatalogService() {
         if (componentLibraryCatalogService == null) {
-            componentLibraryCatalogService = moduleManager.find(CoreModule.NAME).getService(IComponentLibraryCatalogService.class);
+            componentLibraryCatalogService = moduleManager.find(CoreModule.NAME).provider().getService(IComponentLibraryCatalogService.class);
         }
         return componentLibraryCatalogService;
     }
 
     private EndpointInventoryCache getEndpointInventoryCache() {
         if (endpointInventoryCache == null) {
-            endpointInventoryCache = moduleManager.find(CoreModule.NAME).getService(EndpointInventoryCache.class);
+            endpointInventoryCache = moduleManager.find(CoreModule.NAME).provider().getService(EndpointInventoryCache.class);
         }
         return endpointInventoryCache;
     }
@@ -83,29 +84,8 @@ public class TopologyQueryService implements Service {
         List<Call> serviceRelationServerCalls = getTopologyQueryDAO().loadServerSideServiceRelations(step, startTB, endTB);
         List<Call> serviceRelationClientCalls = getTopologyQueryDAO().loadClientSideServiceRelations(step, startTB, endTB);
 
-        List<org.apache.skywalking.oap.server.core.query.entity.Service> serviceList = getMetadataQueryDAO().searchServices(startTimestamp, endTimestamp, Const.EMPTY_STRING);
-
         TopologyBuilder builder = new TopologyBuilder(moduleManager);
         Topology topology = builder.build(serviceRelationClientCalls, serviceRelationServerCalls);
-
-        serviceList.forEach(service -> {
-            boolean contains = false;
-            for (Node node : topology.getNodes()) {
-                if (service.getId() == node.getId()) {
-                    contains = true;
-                    break;
-                }
-            }
-
-            if (!contains) {
-                Node newNode = new Node();
-                newNode.setId(service.getId());
-                newNode.setName(service.getName());
-                newNode.setReal(true);
-                newNode.setType(Const.UNKNOWN);
-                topology.getNodes().add(newNode);
-            }
-        });
 
         return topology;
     }
@@ -126,7 +106,7 @@ public class TopologyQueryService implements Service {
         if (CollectionUtils.isNotEmpty(sourceServiceIds)) {
             List<Call> sourceCalls = getTopologyQueryDAO().loadSpecifiedServerSideServiceRelations(step, startTB, endTB, sourceServiceIds);
             topology.getNodes().forEach(node -> {
-                if (StringUtils.isEmpty(node.getType())) {
+                if (Strings.isNullOrEmpty(node.getType())) {
                     for (Call call : sourceCalls) {
                         if (node.getId() == call.getTarget()) {
                             node.setType(getComponentLibraryCatalogService().getComponentName(call.getComponentId()));

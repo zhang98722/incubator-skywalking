@@ -20,24 +20,18 @@ package org.apache.skywalking.oap.server.core.storage.annotation;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import lombok.Getter;
 import org.apache.skywalking.oap.server.core.analysis.indicator.annotation.IndicatorAnnotationUtils;
 import org.apache.skywalking.oap.server.core.annotation.AnnotationListener;
-import org.apache.skywalking.oap.server.core.source.Scope;
-import org.apache.skywalking.oap.server.core.storage.model.ColumnName;
-import org.apache.skywalking.oap.server.core.storage.model.IModelGetter;
-import org.apache.skywalking.oap.server.core.storage.model.Model;
-import org.apache.skywalking.oap.server.core.storage.model.ModelColumn;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.skywalking.oap.server.core.source.DefaultScopeDefine;
+import org.apache.skywalking.oap.server.core.storage.model.*;
+import org.slf4j.*;
 
 /**
  * @author peng-yongsheng
  */
-public class StorageAnnotationListener implements AnnotationListener, IModelGetter {
+public class StorageAnnotationListener implements AnnotationListener, IModelGetter, IModelOverride {
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAnnotationListener.class);
 
@@ -56,12 +50,14 @@ public class StorageAnnotationListener implements AnnotationListener, IModelGett
 
         String modelName = StorageEntityAnnotationUtils.getModelName(aClass);
         boolean deleteHistory = StorageEntityAnnotationUtils.getDeleteHistory(aClass);
-        Scope sourceScope = StorageEntityAnnotationUtils.getSourceScope(aClass);
+        int sourceScopeId = StorageEntityAnnotationUtils.getSourceScope(aClass);
+        // Check this scope id is valid.
+        DefaultScopeDefine.nameOf(sourceScopeId);
         List<ModelColumn> modelColumns = new LinkedList<>();
         boolean isIndicator = IndicatorAnnotationUtils.isIndicator(aClass);
         retrieval(aClass, modelName, modelColumns);
 
-        models.add(new Model(modelName, modelColumns, isIndicator, deleteHistory, sourceScope));
+        models.add(new Model(modelName, modelColumns, isIndicator, deleteHistory, sourceScopeId));
     }
 
     private void retrieval(Class clazz, String modelName, List<ModelColumn> modelColumns) {
@@ -70,7 +66,7 @@ public class StorageAnnotationListener implements AnnotationListener, IModelGett
         for (Field field : fields) {
             if (field.isAnnotationPresent(Column.class)) {
                 Column column = field.getAnnotation(Column.class);
-                modelColumns.add(new ModelColumn(new ColumnName(column.columnName(), column.columnName()), field.getType(), column.matchQuery()));
+                modelColumns.add(new ModelColumn(new ColumnName(column.columnName()), field.getType(), column.matchQuery()));
                 if (logger.isDebugEnabled()) {
                     logger.debug("The field named {} with the {} type", column.columnName(), field.getType());
                 }
@@ -83,5 +79,18 @@ public class StorageAnnotationListener implements AnnotationListener, IModelGett
         if (Objects.nonNull(clazz.getSuperclass())) {
             retrieval(clazz.getSuperclass(), modelName, modelColumns);
         }
+    }
+
+    @Override public void overrideColumnName(String columnName, String newName) {
+        models.forEach(model -> {
+            model.getColumns().forEach(column -> {
+                ColumnName existColumnName = column.getColumnName();
+                String name = existColumnName.getName();
+                if (name.equals(columnName)) {
+                    existColumnName.setStorageName(newName);
+                    logger.debug("Model {} column {} has been override. The new column name is {}.", model.getName(), name, newName);
+                }
+            });
+        });
     }
 }

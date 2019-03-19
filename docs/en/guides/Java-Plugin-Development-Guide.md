@@ -76,19 +76,19 @@ ContextManager provides all major and primary APIs.
 
 1. Create EntrySpan
 ```java
-public static AbstractSpan createEntrySpan(String operationName, ContextCarrier carrier)
+public static AbstractSpan createEntrySpan(String endpointName, ContextCarrier carrier)
 ```
 Create EntrySpan by operation name(e.g. service name, uri) and **ContextCarrier**.
 
 2. Create LocalSpan
 ```java
-public static AbstractSpan createLocalSpan(String operationName)
+public static AbstractSpan createLocalSpan(String endpointName)
 ```
 Create LocalSpan by operation name(e.g. full method signature)
 
 3. Create ExitSpan
 ```java
-public static AbstractSpan createExitSpan(String operationName, ContextCarrier carrier, String remotePeer)
+public static AbstractSpan createExitSpan(String endpointName, ContextCarrier carrier, String remotePeer)
 ```
 Create ExitSpan by operation name(e.g. service name, uri) and new **ContextCarrier** and peer address
 (e.g. ip+port, hostname+port)
@@ -145,7 +145,7 @@ Create ExitSpan by operation name(e.g. service name, uri) and new **ContextCarri
      *
      * @return this Span instance, for chaining
      */
-    AbstractSpan setOperationName(String operationName);
+    AbstractSpan setOperationName(String endpointName);
 ```
 Besides set operation name, tags and logs, two attributes shoule be set, which are component and layer, 
 especially for EntrySpan and ExitSpan
@@ -159,6 +159,42 @@ SpanLayer is the catalog of span. Here are 5 values:
 
 Component IDs are defined and reserved by SkyWalking project.
 For component name/ID extension, please follow [cComponent library definition and extension](Component-library-settings.md) document.
+
+### Advanced APIs
+#### Async Span APIs
+There is a set of advanced APIs in Span, which work specific for async scenario. When tags, logs, attributes(including end time) of the span
+needs to set in another thread, you should use these APIs.
+
+```java
+    /**
+     * The span finish at current tracing context, but the current span is still alive, until {@link #asyncFinish}
+     * called.
+     *
+     * This method must be called<br/>
+     * 1. In original thread(tracing context).
+     * 2. Current span is active span.
+     *
+     * During alive, tags, logs and attributes of the span could be changed, in any thread.
+     *
+     * The execution times of {@link #prepareForAsync} and {@link #asyncFinish()} must match.
+     *
+     * @return the current span
+     */
+    AbstractSpan prepareForAsync();
+
+    /**
+     * Notify the span, it could be finished.
+     *
+     * The execution times of {@link #prepareForAsync} and {@link #asyncFinish()} must match.
+     *
+     * @return the current span
+     */
+    AbstractSpan asyncFinish();
+```
+1. Call `#prepareForAsync` in original context.
+1. Propagate the span to any other thread.
+1. After all set, call `#asyncFinish` in any thread.
+1. Tracing context will be finished and report to backend when all spans's `#prepareForAsync` finished(Judged by count of API execution).
 
 ## Develop a plugin
 ### Abstract
@@ -281,9 +317,10 @@ We are welcome everyone to contribute plugins.
 
 Please follow there steps:
 1. Submit an issue about which plugins are you going to contribute, including supported version.
-1. Create sub modules under `apm-sniffer/apm-sdk-plugin`, and the name should include supported library name and versions
+1. Create sub modules under `apm-sniffer/apm-sdk-plugin` or `apm-sniffer/optional-plugins`, and the name should include supported library name and versions
 1. Follow this guide to develop. Make sure comments and test cases are provided.
 1. Develop and test.
-1. Send the pull request and ask for review, and provide the automatic test cases by following PMC members guides.
+1. Send the pull request and ask for review. 
+1. Provide the automatic test cases. 
 1. The plugin committers approves your plugins after automatic test cases provided and the tests passed in our CI.
 1. The plugin accepted by SkyWalking. 
