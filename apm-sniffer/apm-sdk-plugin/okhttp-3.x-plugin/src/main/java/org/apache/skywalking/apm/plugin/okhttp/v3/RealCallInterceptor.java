@@ -37,6 +37,7 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.InstanceC
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.InstanceMethodsAroundInterceptor;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
+import org.apache.skywalking.apm.plugin.okhttp.v3.util.BodyUtil;
 
 /**
  * {@link RealCallInterceptor} intercept the synchronous http calls by the discovery of okhttp.
@@ -70,6 +71,7 @@ public class RealCallInterceptor implements InstanceMethodsAroundInterceptor, In
         Tags.HTTP.METHOD.set(span, request.method());
         Tags.URL.set(span, requestUrl.uri().toString());
         SpanLayer.asHttp(span);
+        BodyUtil.log(span, request);
 
         Field headersField = Request.class.getDeclaredField("headers");
         Field modifiersField = Field.class.getDeclaredField("modifiers");
@@ -106,6 +108,9 @@ public class RealCallInterceptor implements InstanceMethodsAroundInterceptor, In
             if (statusCode >= 400) {
                 span.errorOccurred();
                 Tags.STATUS_CODE.set(span, Integer.toString(statusCode));
+            }
+            if (statusCode == 200) {
+                BodyUtil.log(span, response);
             }
         }
 

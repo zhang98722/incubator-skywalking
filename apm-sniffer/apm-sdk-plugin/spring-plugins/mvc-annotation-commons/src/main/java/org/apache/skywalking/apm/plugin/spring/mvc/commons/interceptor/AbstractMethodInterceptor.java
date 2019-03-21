@@ -18,9 +18,6 @@
 
 package org.apache.skywalking.apm.plugin.spring.mvc.commons.interceptor;
 
-import java.lang.reflect.Method;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.context.CarrierItem;
 import org.apache.skywalking.apm.agent.core.context.ContextCarrier;
@@ -34,10 +31,17 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInt
 import org.apache.skywalking.apm.agent.core.util.MethodUtil;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
 import org.apache.skywalking.apm.plugin.spring.mvc.commons.EnhanceRequireObjectCache;
+import org.springframework.web.util.ContentCachingRequestWrapper;
 
-import static org.apache.skywalking.apm.plugin.spring.mvc.commons.Constants.FORWARD_REQUEST_FLAG;
-import static org.apache.skywalking.apm.plugin.spring.mvc.commons.Constants.REQUEST_KEY_IN_RUNTIME_CONTEXT;
-import static org.apache.skywalking.apm.plugin.spring.mvc.commons.Constants.RESPONSE_KEY_IN_RUNTIME_CONTEXT;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.apache.skywalking.apm.plugin.spring.mvc.commons.Constants.*;
 
 /**
  * the abstract method interceptor
@@ -87,6 +91,26 @@ public abstract class AbstractMethodInterceptor implements InstanceMethodsAround
             Tags.HTTP.METHOD.set(span, request.getMethod());
             span.setComponent(ComponentsDefine.SPRING_MVC_ANNOTATION);
             SpanLayer.asHttp(span);
+
+            //record request body
+            if (request instanceof ContentCachingRequestWrapper) {
+                ContentCachingRequestWrapper wrapper = (ContentCachingRequestWrapper)request;
+                byte[] byteArray = wrapper.getContentAsByteArray();
+                if (byteArray != null && byteArray.length > 0) {
+                    Map<String,Object> event = new HashMap<String, Object>();
+                    event.put("requestBody", new String(byteArray, StandardCharsets.UTF_8));
+                    span.log(System.currentTimeMillis(), event);
+                }
+            }
+            Map<String, String[]> parameterMap = request.getParameterMap();
+            if (parameterMap != null && parameterMap.size() > 0) {
+                Map<String,Object> event = new HashMap<String, Object>();
+                String paramter = parameterMap.entrySet().stream()
+                        .map(item -> String.format("%s:%s", item.getKey(), String.join(",", item.getValue())))
+                        .collect(Collectors.joining(","));
+                event.put("request paramter", paramter);
+                span.log(System.currentTimeMillis(), event);
+            }
         }
     }
 

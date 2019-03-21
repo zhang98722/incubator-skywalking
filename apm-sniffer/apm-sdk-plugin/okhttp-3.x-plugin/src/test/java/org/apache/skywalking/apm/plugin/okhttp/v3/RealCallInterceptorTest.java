@@ -20,9 +20,8 @@
 package org.apache.skywalking.apm.plugin.okhttp.v3;
 
 import java.util.List;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
+
+import okhttp3.*;
 import org.apache.skywalking.apm.agent.test.tools.SegmentStorage;
 import org.apache.skywalking.apm.agent.test.tools.SegmentStoragePoint;
 import org.apache.skywalking.apm.agent.test.tools.SpanAssert;
@@ -109,6 +108,7 @@ public class RealCallInterceptorTest {
 
         Response response = mock(Response.class);
         when(response.code()).thenReturn(200);
+        when(response.body()).thenReturn(ResponseBody.create(MediaType.parse("application/json"), "test"));
         realCallInterceptor.afterMethod(enhancedInstance, null, allArguments, argumentTypes, response);
 
         assertThat(segmentStorage.getTraceSegments().size(), is(1));
